@@ -1,24 +1,18 @@
 #!/usr/bin/python3
 
-# Converts the Agilent *.dx files to csv, inspired by the 3rd party Aston library https://github.com/bovee/Aston
-# new files share the structure with the old Agilent .DAD format, but all of the actual data are saved as float64 type
-# instead of int16 or int32 as in old format
-# Converts absorption (UV prefix) and fluorescence (FLD prefix) data if available and saves the csv in the same folder as
-# input file
+# Converts the Agilent *.dx HPLC files, reads the absorption (UV prefix) and fluorescence (FLD prefix) data
+# if available and saves them into csv files in the same folder. Inspired by the 3rd party Aston library
+# https://github.com/bovee/Aston. New files share the structure with the old Agilent .DAD format, but all
+# of the actual data are saved as float64 type instead of int16 or int32 as in old format
 
 import sys
 import os
 import numpy as np
-# import matplotlib.pyplot as plt
 import struct
 import xml.etree.ElementTree as ET
 
 
-# from https://github.com/bovee/Aston
-from aston.tracefile import TraceFile
-
-
-def utf16_read(f):
+def read_utf16(f):
     """modified string read method which works with Agilent files"""
     # determine length to read
     read_len, = struct.unpack('>B', f.read(1))
@@ -44,14 +38,16 @@ def save_mat2csv(fname, matrix, times=None, wls=None, unit=''):
 
 
 def read_data(file, loc, data_scale_factor):
+    """Reads the actual data, file is an open binary file, loc is the location of the data in the file,
+    data_scale_factor additionally scales the read data matrix."""
 
     # various shifts from the initial location for different data
     nrec_shift = 375  # number of records, >i
     sample_name_shift = 955  # utf-16 and the first byte is length of the string
-    scale_factor_shift = 3182  # scale factor for data, >d, unit just after this factor
+    scale_factor_shift = 3182  # scale factor for data, >d, unit is just after this factor
     data_shift = 4193
 
-    space_len = 22  # length of leading bytes before individual spectra, both for FLD and UV
+    space_len = 22  # length of leading bytes before individual spectra, both for FLD and UV data
 
     # scaling factors
     scale_time = 1 / 60000  # time
@@ -63,14 +59,14 @@ def read_data(file, loc, data_scale_factor):
 
     # load name of sample, not necessary
     file.seek(loc + sample_name_shift)
-    sample_name = utf16_read(file)
+    sample_name = read_utf16(file)
 
     # load scaling factor for data
     file.seek(loc + scale_factor_shift)
     scale_fac, = struct.unpack('>d', file.read(8))
     scale_fac *= data_scale_factor
     # load unit of data
-    unit = utf16_read(file)
+    unit = read_utf16(file)
 
     # load data itself
     file.seek(loc + data_shift)
@@ -78,23 +74,28 @@ def read_data(file, loc, data_scale_factor):
     times = np.empty(nrec, dtype=np.float64)
     wavelengths = None
     data_mat = None
-    # leading_bytes = None
 
     for i in range(nrec):
-        # in those 22 bytes before the data, there are 4 same bytes for all spectra: e.g. 46 00 EE 07, last two bytes denotes the size of the block
-        # then there are 4 bytes of time the data corresponds to as <i (le int32)
-        # then there are 3 x 2 bytes of little endian uint16 that corresponds to start, end and step
-        # of the wavelength range
-        # the remaining bytes are the same for all spectra and IDK what they are
+        # in those 22 bytes before the data, there are 4 same bytes for all spectra:
+        # e.g. 46 00 EE 07, last two bytes denotes the size of the block, then there
+        # are 4 bytes of time the data corresponds to as <i (le int32), then there are
+        # 3 x 2 bytes of little endian uint16 that corresponds to start, end and step of
+        # the wavelength range, the remaining bytes are the same for all records and IDK
+        # what they are
         leading_bytes = file.read(space_len)
+        block_size, = struct.unpack('<H', leading_bytes[2:4])
         times[i],  = struct.unpack('<i', leading_bytes[4:8])  # time of measurement
         if wavelengths is None:
             wl_start, wl_end, wl_step = struct.unpack('<HHH', leading_bytes[8:14])
             wavelengths = np.arange(wl_start, wl_end + wl_step, wl_step) * scale_wl
             data_mat = np.empty((nrec, wavelengths.shape[0]), dtype=np.float64)  # create a data matrix for our data
 
-        data_mat[i, :] = np.frombuffer(file.read(8 * data_mat.shape[1]),
-                                       dtype='<d')  # read the values of fluorescence spectra
+        # if this is not valid for some type of files, the algorithm needs to be rewritten
+        # it assumes the block_size is the same for all records, so far it worked...
+        assert (block_size - space_len) / 8 == wavelengths.shape[0]
+
+        # read the block of <d (le float64) values and put them into matrix
+        data_mat[i, :] = np.frombuffer(file.read(8 * wavelengths.shape[0]), dtype='<d')
 
     # apply the scale for data
     data_mat *= scale_fac
@@ -145,7 +146,7 @@ def process_filepath(fpath):
                     uv_ID = traceID_el.text
                     continue
 
-        # ----------- LOAD and SAVE FLD DATA -------
+        # ----------- READ and SAVE FLD DATA -------
 
         if fld_ID is not None:
             # find the locations of fluorescence and UV data (locations are after the XML tree)
@@ -157,7 +158,7 @@ def process_filepath(fpath):
 
             save_mat2csv(os.path.join(_dir, f'FLD_{fname}.csv'), data_mat, times, wavelengths, unit=unit)
 
-        # ----------- LOAD and SAVE UV DATA -------
+        # ----------- READ and SAVE UV DATA -------
 
         if uv_ID is not None:
             uv_id_idx = data.find(bytes(uv_ID + '.UVPK', 'utf8'))
@@ -171,19 +172,18 @@ def process_filepath(fpath):
 if __name__ == '__main__':
     # Show file open dialog if no input files specified on command line
     if len(sys.argv) > 1:
-        filenames = sys.argv[1:]
+        filepaths = sys.argv[1:]
     else:
         from tkinter import Tk, filedialog
 
         tk_root = Tk()
         tk_root.withdraw()
-        filenames = list(filedialog.askopenfilenames(parent=None, title='Select csv input files...'))
+        filepaths = list(filedialog.askopenfilenames(parent=None, title='Select dx input files...'))
         tk_root.destroy()
-        if len(filenames) < 1:
+        if len(filepaths) < 1:
             print('No input files selected. Exiting.')
             exit(1)
 
-    for filename in filenames:
-        process_filepath(filename)
+    for fpath in filepaths:
+        process_filepath(fpath)
 
-exit(0)
