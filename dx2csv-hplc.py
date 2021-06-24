@@ -1,8 +1,10 @@
 #!/usr/bin/python3
 
 # Converts the Agilent *.dx files to csv, inspired by the 3rd party Aston library https://github.com/bovee/Aston
-# new files share the structure with the new Agilent DX files, but all of the actual data are saved as float64 type
-# instead of int16 or int32 as in old .DAD format
+# new files share the structure with the old Agilent .DAD format, but all of the actual data are saved as float64 type
+# instead of int16 or int32 as in old format
+# Converts absorption (UV prefix) and fluorescence (FLD prefix) data if available and saves the csv in the same folder as
+# input file
 
 import sys
 import os
