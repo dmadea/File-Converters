@@ -300,7 +300,7 @@ def create_mol_model(mol: Molecule, atom_size=1, bond1_radius=1, bond2_radius=0.
     :param bond3_radius: Relative factor that multiplies the radius of all cylinders in triple bond.
     :param bond_num_segments: Number of segments the bond is composed of.
     :param sphere_refinement_order: The order of subdivisions of triangles for sphere generation.
-    :param all_bonds_single: If True, all bonds will be single bonds regarding the actual order.
+    :param all_bonds_single: If True, all bonds will be single bonds regardless the actual order.
     :param bd2: Distance between cylinders in double bond.
     :param bd3: Distance between cylinders in triple bond.
     :return: Mesh model.
@@ -368,15 +368,13 @@ if __name__ == "__main__":
     parser.add_argument("--bd3", nargs="?", default=0.17, type=float,
                         help="Distance between cylinders in triple bond. Default 0.17.")
     parser.add_argument("--all_bonds_single", action="store_true",
-                        help="If True, all bonds will be single bonds regarding the actual order.")
+                        help="If True, all bonds will be single bonds regardless the actual order.")
     parser.add_argument("--stl_ascii_mode", action="store_true",
                         help="If True, stl model will be saved in ascii, otherwise in binary format.")
 
     parser.add_argument('files', nargs=argparse.ONE_OR_MORE)
 
     args, _ = parser.parse_known_args()
-
-    # print(args.__dict__)
 
     fnames = []
     for fname in args.files:
