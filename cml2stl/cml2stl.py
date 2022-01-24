@@ -1,18 +1,107 @@
-
-
 import numpy as np
-import math
-from scipy.spatial import Delaunay
-
-from stl import mesh
-import stl
 from numpy.linalg import norm
+import math
+from stl import Mesh, Mode
+import argparse
+from glob import glob
+import os
 
-from cml_reader import parse_CML_file, Molecule
+import xml.etree.ElementTree as ET
+
+el_list = ['H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne', 'Na', 'Mg', 'Al', 'Si', 'P',
+           'S', 'Cl', 'Ar', 'K', 'Ca', 'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',
+           'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr', 'Rb', 'Sr', 'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh',
+           'Pd', 'Ag', 'Cd', 'In', 'Sn', 'Sb', 'Te', 'I', 'Xe', 'Cs', 'Ba', 'La', 'Ce', 'Pr', 'Nd',
+           'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu', 'Hf', 'Ta', 'W', 'Re',
+           'Os', 'Ir', 'Pt', 'Au', 'Hg', 'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn', 'Fr', 'Ra', 'Ac', 'Th',
+           'Pa', 'U', 'Np', 'Pu', 'Am', 'Cm', 'Bk', 'Cf', 'Es', 'Fm', 'Md', 'No', 'Lr', 'Rf', 'Db',
+           'Sg', 'Bh', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn', 'Nh', 'Fl', 'Mc', 'Lv', 'Ts', 'Og']
+#
+# atomic_radia = [53, 120, 145, 105, 85, 70, 65, 60, 50, 160, 180, 150, 125, 110, 100, 100, 100, 71,
+#                 220, 180, 160, 140, 135, 140, 140, 140, 135, 135, 135, 135, 130, 125, 115, 115, 115,
+#                 None, 235, 200, 180, 155, 145, 145, 135, 130, 135, 140, 160, 155, 155, 145, 145, 140,
+#                 140, None, 265, 215, 195, 185, 185, 185, 185, 185, 185, 180, 175, 175, 175, 175, 175,
+#                 175, 175, 155, 145, 135, 135, 130, 135, 135, 135, 150, 190, 180, 160, 190, None, None,
+#                 None, 215, 195, 180, 180, 175, 175, 175, 175, 176, None, None, None, None, None, None,
+#                 None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+#                 None]
+
+# from https://en.wikipedia.org/wiki/Atomic_radii_of_the_elements_(data_page)
+# vdw for H was changed
+vdw_radia = [90, 140, 182, 153, 192, 170, 155, 152, 147, 154, 227, 173, 184, 210, 180, 180, 175, 188, 275, 231,
+             211, None, None, None, None, None, None, 163, 140, 139, 187, 211, 185, 190, 185, 202, 303, 249, None,
+             None, None, None, None, None, None, 163, 172, 158, 193, 217, 206, 206, 198, 216, 343, 268, None, None,
+             None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+             None, None, 175, 166, 155, 196, 202, 207, 197, 202, 220, 348, 283, None, None, None, 186, None, None,
+             None, None, None, None, None, None, None, None, None, None, None,None, None, None, None,None, None, None,
+             None, None, None, None, None, None]
+
+el_radia_dict = dict(zip(el_list, vdw_radia))
+
+
+class Atom(object):
+
+    def __init__(self, id, element_type: str, position: np.ndarray):
+        self.id = id
+        self.element_type = element_type
+        self.position = position
+
+    def size(self):
+        f = 0.003
+        if self.element_type in el_radia_dict:
+            if el_radia_dict[self.element_type] is None:
+                return el_radia_dict['C'] * f
+
+            return el_radia_dict[self.element_type] * f
+
+        raise ValueError('Unknown atom')
+
+
+class Bond(object):
+    def __init__(self, atom1: int, atom2: int, order: int = 1):
+        self.atom1 = atom1
+        self.atom2 = atom2
+        self.order = order
+
+
+class Molecule(object):
+    def __init__(self, atoms: list, bonds: list):
+        self.atoms = atoms
+        self.bonds = bonds
+
+
+def parse_CML_file(filename):
+    with open(filename) as f:
+        xml_text = f.read()
+
+    atoms = []
+    bonds = []
+
+    root = ET.fromstring(xml_text)
+
+    for ar in root.iter('atomArray'):
+        for atom in ar.iter('atom'):
+            attr = atom.attrib
+            new_atom = Atom(attr['id'],
+                            attr['elementType'],
+                            np.asarray([float(attr['x3']),  float(attr['y3']), float(attr['z3'])], dtype=np.float64))
+            atoms.append(new_atom)
+
+    for ar in root.iter('bondArray'):
+        for bond in ar.iter('bond'):
+            attr = bond.attrib
+            at_refs = attr['atomRefs2']
+            a1, a2 = at_refs.split(' ')
+            atom1 = int(a1[1:]) - 1  # indexes in atom list
+            atom2 = int(a2[1:]) - 1
+            new_bond = Bond(atom1, atom2, int(attr['order']))
+            bonds.append(new_bond)
+
+    return Molecule(atoms, bonds)
 
 
 def form_mesh(vertices: np.ndarray, faces: np.ndarray):
-    obj = mesh.Mesh(np.zeros(faces.shape[0], dtype=mesh.Mesh.dtype))
+    obj = Mesh(np.zeros(faces.shape[0], dtype=Mesh.dtype))
     for i, f in enumerate(faces):
         obj.vectors[i][0] = vertices[f[0]]
         obj.vectors[i][1] = vertices[f[1]]
@@ -20,12 +109,14 @@ def form_mesh(vertices: np.ndarray, faces: np.ndarray):
 
     return obj
 
-# https://observablehq.com/@mourner/fast-icosphere-mesh
+
+# from https://observablehq.com/@mourner/fast-icosphere-mesh
 def subdivide(vertices: np.ndarray, faces: np.ndarray, order=1):
     if order == 0:
         return vertices, faces
 
     if order > 1:
+        # recursively subdivide
         for i in range(order):
             vertices, faces = subdivide(vertices, faces, 1)
 
@@ -67,6 +158,7 @@ def subdivide(vertices: np.ndarray, faces: np.ndarray, order=1):
     new_faces = np.asarray(new_faces)
 
     return new_vertices, new_faces
+
 
 # inspiration from https://github.com/PyMesh/PyMesh/blob/main/python/pymesh/meshutils/generate_icosphere.py
 # https://medium.com/@oscarsc/four-ways-to-create-a-mesh-for-a-sphere-d7956b825db4
@@ -117,11 +209,11 @@ def generate_icosphere(radius, center, refinement_order=3):
         [6, 2, 10],
         [8, 6, 7],
         [9, 8, 1],
-        ])
+        ], dtype=int)
 
     vertices, faces = subdivide(vertices, faces, refinement_order)
 
-    # normalize vertices so the distance of each is the same
+    # normalize vertices
     vert_length = np.sqrt((vertices * vertices).sum(axis=1, keepdims=True))
     vertices = vertices / vert_length * radius + center
 
@@ -129,7 +221,7 @@ def generate_icosphere(radius, center, refinement_order=3):
 
 
 # from https://github.com/PyMesh/PyMesh/blob/main/python/pymesh/meshutils/generate_cylinder.py
-def gen_cylinder(p0, p1, radius, num_segments=32):
+def generate_cylinder(p0, p1, radius, num_segments=32):
 
     Z = np.asarray([0, 0, 1])
 
@@ -144,7 +236,7 @@ def gen_cylinder(p0, p1, radius, num_segments=32):
 
     rot_axis = np.cross(Z, axis)  # rotational axis
 
-    rot_matrix = stl.Mesh.rotation_matrix(rot_axis, np.arccos(Z.dot(axis)))
+    rot_matrix = Mesh.rotation_matrix(rot_axis, np.arccos(Z.dot(axis)))
 
     bottom_rim = rot_matrix.dot(rim.T).T * radius + p0
     top_rim = rot_matrix.dot(rim.T).T * radius + p1
@@ -160,51 +252,69 @@ def gen_cylinder(p0, p1, radius, num_segments=32):
     return form_mesh(vertices, faces)
 
 
-def gen_cube(center=(0, 0, 0)):
-    vertices = np.array([
-        [-1, -1, -1],
-        [+1, -1, -1],
-        [+1, +1, -1],
-        [-1, +1, -1],
-        [-1, -1, +1],
-        [+1, -1, +1],
-        [+1, +1, +1],
-        [-1, +1, +1]], dtype=np.float64) + np.asarray(center)
-
-    # Define the 12 triangles composing the cube
-    faces = np.array([
-        [0, 3, 1],
-        [1, 3, 2],
-        [0, 4, 7],
-        [0, 7, 3],
-        [4, 5, 6],
-        [4, 6, 7],
-        [5, 1, 2],
-        [5, 2, 6],
-        [2, 3, 6],
-        [3, 7, 6],
-        [0, 1, 5],
-        [0, 5, 4]], dtype=int)
-
-    return form_mesh(vertices, faces)
-
-
-def combine(objs: list):
-    return mesh.Mesh(np.concatenate([obj.data for obj in objs]))
+# def gen_cube(center=(0, 0, 0)):
+#     vertices = np.array([
+#         [-1, -1, -1],
+#         [+1, -1, -1],
+#         [+1, +1, -1],
+#         [-1, +1, -1],
+#         [-1, -1, +1],
+#         [+1, -1, +1],
+#         [+1, +1, +1],
+#         [-1, +1, +1]], dtype=np.float64) + np.asarray(center)
+#
+#     # Define the 12 triangles composing the cube
+#     faces = np.array([
+#         [0, 3, 1],
+#         [1, 3, 2],
+#         [0, 4, 7],
+#         [0, 7, 3],
+#         [4, 5, 6],
+#         [4, 6, 7],
+#         [5, 1, 2],
+#         [5, 2, 6],
+#         [2, 3, 6],
+#         [3, 7, 6],
+#         [0, 1, 5],
+#         [0, 5, 4]], dtype=int)
+#
+#     return form_mesh(vertices, faces)
 
 
-def random_point(limit=50):
-    return (np.random.random(3) - 0.5) * 2 * limit
+def combine_objects(objs: list):
+    return Mesh(np.concatenate([obj.data for obj in objs]))
 
 
+def create_mol_model(mol: Molecule, atom_size=1, bond1_radius=1, bond2_radius=0.65, bond3_radius=0.45,
+                     bond_num_segments=32, sphere_refinement_order=3, all_bonds_single=False, bd2=0.14, bd3=0.17,
+                     **kwargs):
+    """
 
-def create_mol_model(mol: Molecule, atom_size=0.3, bond_radius=0.15,
-                     bond_num_segments=32, sphere_refinment_order=3,
-                     create_bond_orders=False, bond_distance=0.13):
+    Creates the mesh for the whole molecule including bonds.
+
+
+    :param mol: Molecule.
+    :param atom_size: Relative factor that multiplies the van der Walls radius of each atom.
+    :param bond1_radius: Relative factor that multiplies the radius of cylinder of single bond.
+    :param bond2_radius: Relative factor that multiplies the radius of both cylinders in double bond.
+    :param bond3_radius: Relative factor that multiplies the radius of all cylinders in triple bond.
+    :param bond_num_segments: Number of segments the bond is composed of.
+    :param sphere_refinement_order: The order of subdivisions of triangles for sphere generation.
+    :param all_bonds_single: If True, all bonds will be single bonds regarding the actual order.
+    :param bd2: Distance between cylinders in double bond.
+    :param bd3: Distance between cylinders in triple bond.
+    :return: Mesh model.
+    """
+
+    bond_factor = 0.17
+
+    bond1_radius *= bond_factor
+    bond2_radius *= bond_factor
+    bond3_radius *= bond_factor
 
     objects = []
     for atom in mol.atoms:
-        atom_obj = generate_icosphere(atom.size() * atom_size, atom.position, sphere_refinment_order)
+        atom_obj = generate_icosphere(atom.size() * atom_size, atom.position, sphere_refinement_order)
         objects.append(atom_obj)
 
     for bond in mol.bonds:
@@ -212,58 +322,85 @@ def create_mol_model(mol: Molecule, atom_size=0.3, bond_radius=0.15,
         a2pos = mol.atoms[bond.atom2].position
 
         Z_ax = np.asarray([0, 0, 1])
-        f = bond_distance
 
-        b_direct = gen_cylinder(a1pos, a2pos, bond_radius, bond_num_segments)
-        if create_bond_orders:
+        b_direct = generate_cylinder(a1pos, a2pos, bond1_radius, bond_num_segments)
+        if not all_bonds_single:
             bond_ax = a2pos - a1pos
             perp_ax = np.cross(bond_ax, Z_ax)
             perp_ax /= norm(perp_ax)  # perpendicular axis to bond axis
-            b_up = gen_cylinder(a1pos + perp_ax * f, a2pos + perp_ax * f, bond_radius, bond_num_segments)
-            b_down = gen_cylinder(a1pos - perp_ax * f, a2pos - perp_ax * f, bond_radius, bond_num_segments)
 
             if bond.order == 1:
                 objects.append(b_direct)
             elif bond.order == 2:
+                v_diff = perp_ax * bd2
+                b_up = generate_cylinder(a1pos + v_diff, a2pos + v_diff, bond2_radius, bond_num_segments)
+                b_down = generate_cylinder(a1pos - v_diff, a2pos - v_diff, bond2_radius, bond_num_segments)
                 objects += [b_up, b_down]
             elif bond.order == 3:
+                v_diff = perp_ax * bd3
+                b_direct = generate_cylinder(a1pos, a2pos, bond3_radius, bond_num_segments)
+                b_up = generate_cylinder(a1pos + v_diff, a2pos + v_diff, bond3_radius, bond_num_segments)
+                b_down = generate_cylinder(a1pos - v_diff, a2pos - v_diff, bond3_radius, bond_num_segments)
                 objects += [b_direct, b_up, b_down]
         else:
             objects.append(b_direct)
 
-    return combine(objects)
+    return combine_objects(objects)
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
 
-    file = 'NHME2-PDP.cml'
-    # file = 'bilirubin.cml'
+    parser.add_argument("--atom_size", nargs="?", default=1.0, type=float,
+                        help="Relative factor that multiplies the van der Walls radius of each atom. Default 1.")
+    parser.add_argument("--bond1_radius", nargs="?", default=1.0, type=float,
+                        help="Relative factor that multiplies the radius of cylinder of single bond. Default 1.")
+    parser.add_argument("--bond2_radius", nargs="?", default=0.65, type=float,
+                        help="Relative factor that multiplies the radius of both cylinders in double bond. Default 0.65.")
+    parser.add_argument("--bond3_radius", nargs="?", default=0.45, type=float,
+                        help="Relative factor that multiplies the radius of all cylinders in triple bond. Default 0.45.")
+    parser.add_argument("--bond_num_segments", nargs="?", default=32, type=int,
+                        help="Number of segments the bond is composed of. Default 32.")
+    parser.add_argument("--sphere_refinement_order", nargs="?", default=3, type=int,
+                        help="The order of subdivisions of triangles for sphere generation. Default 3.")
+    parser.add_argument("--bd2", nargs="?", default=0.14, type=float,
+                        help="Distance between cylinders in double bond. Default 0.14.")
+    parser.add_argument("--bd3", nargs="?", default=0.17, type=float,
+                        help="Distance between cylinders in triple bond. Default 0.17.")
+    parser.add_argument("--all_bonds_single", action="store_true",
+                        help="If True, all bonds will be single bonds regarding the actual order.")
+    parser.add_argument("--stl_ascii_mode", action="store_true",
+                        help="If True, stl model will be saved in ascii, otherwise in binary format.")
 
-    molecule = parse_CML_file(file)
+    parser.add_argument('files', nargs=argparse.ONE_OR_MORE)
 
-    model = create_mol_model(molecule)
+    args, _ = parser.parse_known_args()
 
-    model.save(f'{file}.stl', mode=stl.Mode.BINARY)
+    # print(args.__dict__)
 
-    #
-    # objects = []
-    #
-    # for i in range(100):
-    #     cube = gen_cube(random_point())
-    #     cube.rotate(random_point(), theta=np.random.random(1)[0] * 2 * np.pi)
-    #     objects.append(cube)
-    #
-    # for i in range(30):
-    #     cyl = gen_cylinder(random_point(), random_point(), np.random.random(1)[0] * 2 + 0.1)
-    #     objects.append(cyl)
-    #
-    # for i in range(50):
-    #     rad = np.random.random(1)[0] * 4 + 0.2
-    #     sphere = generate_icosphere(rad, random_point())
-    #     objects.append(sphere)
-    #
-    # combined = combine(objects)
-    # #
-    # # # Write the mesh to file "cube.stl"
-    # combined.save('objects.stl', mode=stl.Mode.BINARY)
-    #
+    fnames = []
+    for fname in args.files:
+        fnames += glob(fname)
+
+    assert args.bond_num_segments > 2, "Number of bond segments must be > 2"
+
+    for fpath in fnames:
+        if not os.path.isfile(fpath):
+            continue
+
+        _dir, fname = os.path.split(fpath)  # get dir and filename
+        fname, ext = os.path.splitext(fname)  # get filename without extension
+
+        print(f'Processing \'{fname}{ext}\'...')
+
+        molecule = parse_CML_file(fpath)
+        model = create_mol_model(molecule, **args.__dict__)
+
+        model.save(os.path.join(_dir, f'{fname}.stl'), mode=Mode.ASCII if args.stl_ascii_mode else Mode.BINARY)
+
+        print(f'\'{fname}{ext}\' finished.\n')
+
+
+
+
+
