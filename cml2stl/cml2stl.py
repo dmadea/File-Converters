@@ -39,10 +39,17 @@ vdw_radia = [90, 140, 182, 153, 192, 170, 155, 152, 147, 154, 227, 173, 184, 210
 el_radia_dict = dict(zip(el_list, vdw_radia))
 
 
+class Molecule(object):
+    def __init__(self, atoms: list, bonds: list):
+        self.atoms = atoms
+        self.bonds = bonds
+
+
 class Atom(object):
 
-    def __init__(self, id, element_type: str, position: np.ndarray):
-        self.id = id
+    def __init__(self, parent_molecule: Molecule, idx, element_type: str, position: np.ndarray):
+        self.parent_molecule = parent_molecule
+        self.idx = idx
         self.element_type = element_type
         self.position = position
 
@@ -56,18 +63,51 @@ class Atom(object):
 
         raise ValueError('Unknown atom')
 
+    def get_all_neighboring_atoms(self, bond_order=1, exclude=None) -> list:
+        atoms = []
+        for bond in filter(lambda b: b.order == bond_order and (b.atom1_idx == self.idx or b.atom2_idx == self.idx),
+                           self.parent_molecule.bonds):
+
+            atom = bond.atom1 if bond.atom1 != self else bond.atom2
+            if exclude:
+                if atom in exclude:
+                    continue
+
+            atoms.append(atom)
+
+        return atoms
+
+    def __repr__(self):
+        return f"<Atom {self.idx}: {self.element_type}, position: {self.position}>"
+
 
 class Bond(object):
-    def __init__(self, atom1: int, atom2: int, order: int = 1):
-        self.atom1 = atom1
-        self.atom2 = atom2
+    def __init__(self, parent_molecule: Molecule, atom1_idx: int, atom2_idx: int, order: int = 1):
+        self.parent_molecule = parent_molecule
+        self.atom1_idx = atom1_idx
+        self.atom2_idx = atom2_idx
         self.order = order
 
+    @property
+    def atom1(self) -> Atom:
+        return self.parent_molecule.atoms[self.atom1_idx]
 
-class Molecule(object):
-    def __init__(self, atoms: list, bonds: list):
-        self.atoms = atoms
-        self.bonds = bonds
+    @property
+    def atom2(self) -> Atom:
+        return self.parent_molecule.atoms[self.atom2_idx]
+
+    def get_all_neighboring_atoms(self, bond_order=1) -> list:
+        """Returns the neighboring atoms of atoms that form the bond. Bond atoms are excluded."""
+        atoms = []
+        pair = [self.atom1, self.atom2]
+
+        for atom in pair:
+            atoms += list(filter(lambda a: a not in pair, atom.get_all_neighboring_atoms(bond_order)))
+
+        return atoms
+
+    def __repr__(self):
+        return f"Bond connecting {self.atom1.__repr__()} and {self.atom2.__repr__()}"
 
 
 def parse_CML_file(filename):
@@ -78,11 +118,12 @@ def parse_CML_file(filename):
     bonds = []
 
     root = ET.fromstring(xml_text)
+    mol = Molecule(atoms, bonds)
 
     for ar in root.iter('atomArray'):
         for atom in ar.iter('atom'):
             attr = atom.attrib
-            new_atom = Atom(attr['id'],
+            new_atom = Atom(mol, int(attr['id'][1:]) - 1,
                             attr['elementType'],
                             np.asarray([float(attr['x3']),  float(attr['y3']), float(attr['z3'])], dtype=np.float64))
             atoms.append(new_atom)
@@ -94,10 +135,10 @@ def parse_CML_file(filename):
             a1, a2 = at_refs.split(' ')
             atom1 = int(a1[1:]) - 1  # indexes in atom list
             atom2 = int(a2[1:]) - 1
-            new_bond = Bond(atom1, atom2, int(attr['order']))
+            new_bond = Bond(mol, atom1, atom2, int(attr['order']))
             bonds.append(new_bond)
 
-    return Molecule(atoms, bonds)
+    return mol
 
 
 def form_mesh(vertices: np.ndarray, faces: np.ndarray):
@@ -318,26 +359,44 @@ def create_mol_model(mol: Molecule, atom_size=1, bond1_radius=1, bond2_radius=0.
         objects.append(atom_obj)
 
     for bond in mol.bonds:
-        a1pos = mol.atoms[bond.atom1].position
-        a2pos = mol.atoms[bond.atom2].position
+        a1pos = bond.atom1.position
+        a2pos = bond.atom2.position
 
-        Z_ax = np.asarray([0, 0, 1])
+        # Z_ax = np.asarray([0, 0, 1])
 
         b_direct = generate_cylinder(a1pos, a2pos, bond1_radius, bond_num_segments)
         if not all_bonds_single:
             bond_ax = a2pos - a1pos
-            perp_ax = np.cross(bond_ax, Z_ax)
-            perp_ax /= norm(perp_ax)  # perpendicular axis to bond axis
+
+            # IDK how determining of bond axis works, it should not work... but it does
+            # it may for sure crash for triple bond, should be rewritten
+
+            a1_n_atoms = bond.atom1.get_all_neighboring_atoms(1, exclude=[bond.atom2])
+            a2_n_atoms = bond.atom2.get_all_neighboring_atoms(1, exclude=[bond.atom1])
+
+            neighboring_axes = [a1pos - at.position for at in a1_n_atoms]
+            neighboring_axes += [-a2pos + at.position for at in a2_n_atoms]
+            neighboring_axes = np.asarray(neighboring_axes)
+
+            perp_axex = np.cross(neighboring_axes, bond_ax)
+            perp_axex /= norm(perp_axex, axis=-1, keepdims=True)
+
+            p_axis_ring = perp_axex.mean(axis=0)
+            p_axis_ring /= norm(p_axis_ring)
+
+            # this should be the right one...
+            # p_axis_bond = np.cross(bond_ax, p_axis_ring)
+            # p_axis_bond /= norm(p_axis_bond)  # averaged perpendicular axis for the bond
 
             if bond.order == 1:
                 objects.append(b_direct)
             elif bond.order == 2:
-                v_diff = perp_ax * bd2
+                v_diff = p_axis_ring * bd2
                 b_up = generate_cylinder(a1pos + v_diff, a2pos + v_diff, bond2_radius, bond_num_segments)
                 b_down = generate_cylinder(a1pos - v_diff, a2pos - v_diff, bond2_radius, bond_num_segments)
                 objects += [b_up, b_down]
             elif bond.order == 3:
-                v_diff = perp_ax * bd3
+                v_diff = p_axis_ring * bd3
                 b_direct = generate_cylinder(a1pos, a2pos, bond3_radius, bond_num_segments)
                 b_up = generate_cylinder(a1pos + v_diff, a2pos + v_diff, bond3_radius, bond_num_segments)
                 b_down = generate_cylinder(a1pos - v_diff, a2pos - v_diff, bond3_radius, bond_num_segments)
@@ -349,6 +408,16 @@ def create_mol_model(mol: Molecule, atom_size=1, bond1_radius=1, bond2_radius=0.
 
 
 if __name__ == "__main__":
+
+    # fpath = 'BENZYLAMINE-PDP-opt.cml'
+    # _dir, fname = os.path.split(fpath)  # get dir and filename
+    # fname, ext = os.path.splitext(fname)  # get filename without extension
+    #
+    # molecule = parse_CML_file(fpath)
+    # model = create_mol_model(molecule)
+    #
+    # model.save(os.path.join(_dir, f'{fname}.stl'), mode=Mode.BINARY)
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--atom_size", nargs="?", default=1.0, type=float,
