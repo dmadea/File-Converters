@@ -262,7 +262,7 @@ def generate_icosphere(radius, center, refinement_order=3):
 
 
 # from https://github.com/PyMesh/PyMesh/blob/main/python/pymesh/meshutils/generate_cylinder.py
-def generate_cylinder(p0, p1, radius, num_segments=32):
+def generate_cylinder(p0, p1, radius, num_segments=64):
 
     Z = np.asarray([0, 0, 1])
 
@@ -282,13 +282,23 @@ def generate_cylinder(p0, p1, radius, num_segments=32):
     bottom_rim = rot_matrix.dot(rim.T).T * radius + p0
     top_rim = rot_matrix.dot(rim.T).T * radius + p1
 
-    vertices = np.vstack([bottom_rim, top_rim])
+    vertices = np.vstack([p0, p1, bottom_rim, top_rim])
 
-    faces = np.array([
-        [[i, (i + 1) % num_segments, i + num_segments],
-         [i + num_segments, (i + 1) % num_segments, (i + 1) % num_segments + num_segments]]
+    bottom_fan = np.array([
+        [0, (i + 1) % num_segments + 2, i + 2]
         for i in range(num_segments)], dtype=int)
-    faces = faces.reshape((-1, 3), order="C")
+
+    top_fan = np.array([
+        [1, i + num_segments + 2, (i + 1) % num_segments + num_segments + 2]
+        for i in range(num_segments)], dtype=int)
+
+    side = np.array([
+        [[2 + i, 2 + (i + 1) % num_segments, 2 + i + num_segments],
+         [2 + i + num_segments, 2 + (i + 1) % num_segments, 2 + (i + 1) % num_segments + num_segments]]
+        for i in range(num_segments)], dtype=int)
+    side = side.reshape((-1, 3), order="C")
+
+    faces = np.vstack([bottom_fan, top_fan, side])
 
     return form_mesh(vertices, faces)
 
@@ -326,9 +336,15 @@ def combine_objects(objs: list):
     return Mesh(np.concatenate([obj.data for obj in objs]))
 
 
+class PrintMode(object):
+    OnlyAtoms = 0
+    OnlyBonds = 1
+    All = 2
+
+
 def create_mol_model(mol: Molecule, atom_size=1, bond1_radius=1, bond2_radius=0.65, bond3_radius=0.45,
-                     bond_num_segments=32, sphere_refinement_order=3, all_bonds_single=False, bd2=0.14, bd3=0.17,
-                     **kwargs):
+                     bond_num_segments=64, sphere_refinement_order=3, all_bonds_single=False, bd2=0.14, bd3=0.17,
+                     mode: int = PrintMode.All, **kwargs):
     """
 
     Creates the mesh for the whole molecule including bonds.
@@ -344,6 +360,8 @@ def create_mol_model(mol: Molecule, atom_size=1, bond1_radius=1, bond2_radius=0.
     :param all_bonds_single: If True, all bonds will be single bonds regardless the actual order.
     :param bd2: Distance between cylinders in double bond.
     :param bd3: Distance between cylinders in triple bond.
+    :param mode: Printing mode. Default bonds and atoms will be printed.
+
     :return: Mesh model.
     """
 
@@ -354,55 +372,57 @@ def create_mol_model(mol: Molecule, atom_size=1, bond1_radius=1, bond2_radius=0.
     bond3_radius *= bond_factor
 
     objects = []
-    for atom in mol.atoms:
-        atom_obj = generate_icosphere(atom.size() * atom_size, atom.position, sphere_refinement_order)
-        objects.append(atom_obj)
+    if mode in [PrintMode.OnlyAtoms, PrintMode.All]:
+        for atom in mol.atoms:
+            atom_obj = generate_icosphere(atom.size() * atom_size, atom.position, sphere_refinement_order)
+            objects.append(atom_obj)
 
-    for bond in mol.bonds:
-        a1pos = bond.atom1.position
-        a2pos = bond.atom2.position
+    if mode in [PrintMode.OnlyBonds, PrintMode.All]:
+        for bond in mol.bonds:
+            a1pos = bond.atom1.position
+            a2pos = bond.atom2.position
 
-        # Z_ax = np.asarray([0, 0, 1])
+            # Z_ax = np.asarray([0, 0, 1])
 
-        b_direct = generate_cylinder(a1pos, a2pos, bond1_radius, bond_num_segments)
-        if not all_bonds_single:
-            bond_ax = a2pos - a1pos
+            b_direct = generate_cylinder(a1pos, a2pos, bond1_radius, bond_num_segments)
+            if not all_bonds_single:
+                bond_ax = a2pos - a1pos
 
-            # IDK how determining of bond axis works, it should not work... but it does
-            # it may for sure crash for triple bond, should be rewritten
+                # IDK how determining of bond axis works, it should not work... but it does
+                # it may for sure crash for triple bond, should be rewritten
 
-            a1_n_atoms = bond.atom1.get_all_neighboring_atoms(1, exclude=[bond.atom2])
-            a2_n_atoms = bond.atom2.get_all_neighboring_atoms(1, exclude=[bond.atom1])
+                a1_n_atoms = bond.atom1.get_all_neighboring_atoms(1, exclude=[bond.atom2])
+                a2_n_atoms = bond.atom2.get_all_neighboring_atoms(1, exclude=[bond.atom1])
 
-            neighboring_axes = [a1pos - at.position for at in a1_n_atoms]
-            neighboring_axes += [-a2pos + at.position for at in a2_n_atoms]
-            neighboring_axes = np.asarray(neighboring_axes)
+                neighboring_axes = [a1pos - at.position for at in a1_n_atoms]
+                neighboring_axes += [-a2pos + at.position for at in a2_n_atoms]
+                neighboring_axes = np.asarray(neighboring_axes)
 
-            perp_axex = np.cross(neighboring_axes, bond_ax)
-            perp_axex /= norm(perp_axex, axis=-1, keepdims=True)
+                perp_axex = np.cross(neighboring_axes, bond_ax)
+                perp_axex /= norm(perp_axex, axis=-1, keepdims=True)
 
-            p_axis_ring = perp_axex.mean(axis=0)
-            p_axis_ring /= norm(p_axis_ring)
+                p_axis_ring = perp_axex.mean(axis=0)
+                p_axis_ring /= norm(p_axis_ring)
 
-            # this should be the right one...
-            # p_axis_bond = np.cross(bond_ax, p_axis_ring)
-            # p_axis_bond /= norm(p_axis_bond)  # averaged perpendicular axis for the bond
+                # this should be the right one...
+                # p_axis_bond = np.cross(bond_ax, p_axis_ring)
+                # p_axis_bond /= norm(p_axis_bond)  # averaged perpendicular axis for the bond
 
-            if bond.order == 1:
+                if bond.order == 1:
+                    objects.append(b_direct)
+                elif bond.order == 2:
+                    v_diff = p_axis_ring * bd2
+                    b_up = generate_cylinder(a1pos + v_diff, a2pos + v_diff, bond2_radius, bond_num_segments)
+                    b_down = generate_cylinder(a1pos - v_diff, a2pos - v_diff, bond2_radius, bond_num_segments)
+                    objects += [b_up, b_down]
+                elif bond.order == 3:
+                    v_diff = p_axis_ring * bd3
+                    b_direct = generate_cylinder(a1pos, a2pos, bond3_radius, bond_num_segments)
+                    b_up = generate_cylinder(a1pos + v_diff, a2pos + v_diff, bond3_radius, bond_num_segments)
+                    b_down = generate_cylinder(a1pos - v_diff, a2pos - v_diff, bond3_radius, bond_num_segments)
+                    objects += [b_direct, b_up, b_down]
+            else:
                 objects.append(b_direct)
-            elif bond.order == 2:
-                v_diff = p_axis_ring * bd2
-                b_up = generate_cylinder(a1pos + v_diff, a2pos + v_diff, bond2_radius, bond_num_segments)
-                b_down = generate_cylinder(a1pos - v_diff, a2pos - v_diff, bond2_radius, bond_num_segments)
-                objects += [b_up, b_down]
-            elif bond.order == 3:
-                v_diff = p_axis_ring * bd3
-                b_direct = generate_cylinder(a1pos, a2pos, bond3_radius, bond_num_segments)
-                b_up = generate_cylinder(a1pos + v_diff, a2pos + v_diff, bond3_radius, bond_num_segments)
-                b_down = generate_cylinder(a1pos - v_diff, a2pos - v_diff, bond3_radius, bond_num_segments)
-                objects += [b_direct, b_up, b_down]
-        else:
-            objects.append(b_direct)
 
     return combine_objects(objects)
 
@@ -414,7 +434,7 @@ if __name__ == "__main__":
     # fname, ext = os.path.splitext(fname)  # get filename without extension
     #
     # molecule = parse_CML_file(fpath)
-    # model = create_mol_model(molecule)
+    # model = create_mol_model(molecule, mode=PrintMode.All)
     #
     # model.save(os.path.join(_dir, f'{fname}.stl'), mode=Mode.BINARY)
 
@@ -428,8 +448,8 @@ if __name__ == "__main__":
                         help="Relative factor that multiplies the radius of both cylinders in double bond. Default 0.65.")
     parser.add_argument("--bond3_radius", nargs="?", default=0.45, type=float,
                         help="Relative factor that multiplies the radius of all cylinders in triple bond. Default 0.45.")
-    parser.add_argument("--bond_num_segments", nargs="?", default=32, type=int,
-                        help="Number of segments the bond is composed of. Default 32.")
+    parser.add_argument("--bond_num_segments", nargs="?", default=64, type=int,
+                        help="Number of segments the bond is composed of. Default 64.")
     parser.add_argument("--sphere_refinement_order", nargs="?", default=3, type=int,
                         help="The order of subdivisions of triangles for sphere generation. Default 3.")
     parser.add_argument("--bd2", nargs="?", default=0.14, type=float,
