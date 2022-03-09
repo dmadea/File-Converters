@@ -1,0 +1,1 @@
+to convert wiff and wiff.scan to mzML, use https://gnps-quickstart.ucsd.edu/conversion
