@@ -11,33 +11,10 @@ import numpy as np
 import struct
 import xml.etree.ElementTree as ET
 
-
-def read_utf16(f):
-    """modified string read method which works with Agilent files"""
-    # determine length to read
-    read_len, = struct.unpack('>B', f.read(1))
-    # read values, decode, and strip
-    data = f.read(2 * read_len)
-    text = data.decode('utf16').strip()
-
-    return text
+from hplc_converter_base import read_utf16, save_mat2csv
 
 
-def save_mat2csv(fname, matrix, times=None, wls=None, unit=''):
-    delimiter = ','
-    times = np.arange(0, matrix.shape[0]) if times is None else times
-    wls = np.arange(0, matrix.shape[1]) if wls is None else wls
-
-    mat = np.hstack((times[:, None], matrix))
-    buffer = f'unit: {unit} - Elution Time | Wavelength->'
-    buffer += delimiter + delimiter.join(f"{num}" for num in wls) + '\n'
-    buffer += '\n'.join(delimiter.join(f"{num}" for num in row) for row in mat)
-
-    with open(fname, 'w', encoding='utf8') as f:
-        f.write(buffer)
-
-
-def read_data(file, loc, data_scale_factor):
+def _read_data(file, loc, data_scale_factor):
     """Reads the actual data, file is an open binary file, loc is the location of the data in the file,
     data_scale_factor additionally scales the read data matrix."""
 
@@ -154,7 +131,7 @@ def process_filepath(fpath):
             # 4 bytes before the ID is location in data file
             FLD_loc, = struct.unpack('<I', data[fld_id_idx - 4: fld_id_idx])
 
-            data_mat, times, wavelengths, _, unit = read_data(f, FLD_loc, 1e-6)  # an extra scaling factor
+            data_mat, times, wavelengths, _, unit = _read_data(f, FLD_loc, 1e-6)  # an extra scaling factor
 
             save_mat2csv(os.path.join(_dir, f'FLD_{fname}.csv'), data_mat, times, wavelengths, unit=unit)
 
@@ -164,7 +141,7 @@ def process_filepath(fpath):
             uv_id_idx = data.find(bytes(uv_ID + '.UVPK', 'utf8'))
             UV_loc, = struct.unpack('<I', data[uv_id_idx - 4: uv_id_idx])
 
-            data_mat, times, wavelengths, _, unit = read_data(f, UV_loc, 1 / 2000)  # an extra scaling factor
+            data_mat, times, wavelengths, _, unit = _read_data(f, UV_loc, 1 / 2000)  # an extra scaling factor
 
             save_mat2csv(os.path.join(_dir, f'UV_{fname}.csv'), data_mat, times, wavelengths, unit=unit)
 
