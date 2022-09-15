@@ -48,8 +48,9 @@ def parse_mzml_file(filepath, mz_resolution=1):
             mz_array = np.linspace(mzmin, mzmax, int((mzmax - mzmin) / mz_resolution) + 1) # make sure to have evenly spaced integerers
             mat = np.zeros((n_spectra, mz_array.shape[0]))
             times = np.zeros(n_spectra)
+            diff = mzmax - mzmin
 
-        indexes = (sp['m/z array'] * mz_array.shape[0] / mzmax).astype(int)
+        indexes = ((sp['m/z array'] - mzmin) * mz_array.shape[0] / diff).astype(int)
 
         # find duplicated and integrate (just sum) them 
         indexes, indices, counts = np.unique(indexes, return_index=True, return_counts=True)
