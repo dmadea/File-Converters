@@ -11,7 +11,7 @@ import os
 import numpy as np
 from pyteomics.mzml import read, iterfind
 
-MZ_RESOLUTION = 1  # change the value here
+MZ_RESOLUTIONs = [0.5, 1, 2]  # change the value here
 
 
 def save_mat2csv(fname, matrix, times=None, wls=None, delimiter=','):
@@ -91,11 +91,11 @@ if __name__ == '__main__':
 
         fpath_wout_ext = os.path.splitext(filename)[0]
         dir, basename = os.path.split(fpath_wout_ext)
-        basename += '.csv'
 
-        matrix, times, mz_array = parse_mzml_file(filename, MZ_RESOLUTION)
-
-        save_mat2csv(os.path.join(dir, basename), matrix, times, mz_array)
+        for res in MZ_RESOLUTIONs:
+            new_filename = f'{basename}-{res}res.csv'
+            matrix, times, mz_array = parse_mzml_file(filename, res)
+            save_mat2csv(os.path.join(dir, new_filename), matrix, times, mz_array)
         
 exit(0)
 
