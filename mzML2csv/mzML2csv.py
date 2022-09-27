@@ -11,7 +11,7 @@ import os
 import numpy as np
 from pyteomics.mzml import read, iterfind
 
-MZ_RESOLUTIONs = [0.5, 1, 2]  # change the value here
+MZ_RESOLUTIONs = [0.2, 0.5, 1.0]  # change the value here
 
 
 def save_mat2csv(fname, matrix, times=None, wls=None, delimiter=','):
@@ -50,7 +50,7 @@ def parse_mzml_file(filepath, mz_resolution=1):
             times = np.zeros(n_spectra)
             diff = mzmax - mzmin
 
-        indexes = ((sp['m/z array'] - mzmin) * mz_array.shape[0] / diff).astype(int)
+        indexes = ((sp['m/z array'] - mzmin) * (mz_array.shape[0] - 1) / diff).astype(int)
 
         # find duplicated and integrate (just sum) them 
         indexes, indices, counts = np.unique(indexes, return_index=True, return_counts=True)
