@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python3.9
 
 # Converts the mzML files to csv, uses 3rd party pyteomics library https://github.com/levitsky/pyteomics 
 # for parsing the mzML file, the only parameter that can be changed here in this file is resolution of MS data
@@ -11,6 +11,7 @@ import os
 import numpy as np
 from pyteomics.mzml import read, iterfind
 
+norm_to_TIC = True  # if True, data will be normalized to total ion current
 MZ_RESOLUTIONs = [0.2, 0.5, 1.0]  # change the value here
 
 
@@ -95,6 +96,10 @@ if __name__ == '__main__':
         for res in MZ_RESOLUTIONs:
             new_filename = f'{basename}-{res}res.csv'
             matrix, times, mz_array = parse_mzml_file(filename, res)
+			
+            if norm_to_TIC:
+                matrix /= np.trapz(matrix, x=mz_array, axis=1)[:, None]                
+			
             save_mat2csv(os.path.join(dir, new_filename), matrix, times, mz_array)
         
 exit(0)
