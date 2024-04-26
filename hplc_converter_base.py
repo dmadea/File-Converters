@@ -14,15 +14,15 @@ def read_utf16(f):
     return text
 
 
-def save_mat2csv(fname, matrix, times=None, wls=None, unit=''):
+def save_mat2csv(fname, matrix, times=None, wls=None, unit='', ):
     delimiter = ','
     times = np.arange(0, matrix.shape[0]) if times is None else times
     wls = np.arange(0, matrix.shape[1]) if wls is None else wls
 
     mat = np.hstack((times[:, None], matrix))
-    buffer = f'unit: {unit} - Elution Time | Wavelength->'
-    buffer += delimiter + delimiter.join(f"{num}" for num in wls) + '\n'
-    buffer += '\n'.join(delimiter.join(f"{num}" for num in row) for row in mat)
+    buffer = f'unit: {unit} - Time | Wavelength->'
+    buffer += delimiter + delimiter.join(f"{num:.6g}" for num in wls) + '\n'
+    buffer += '\n'.join(delimiter.join(f"{num:.6g}" for num in row) for row in mat)
 
     with open(fname, 'w', encoding='utf8') as f:
         f.write(buffer)
