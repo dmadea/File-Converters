@@ -8,7 +8,8 @@ import re
 
 from hplc_converter_base import save_mat2csv
 
-r = re.compile(r"(\d+)acc")
+racc = re.compile(r"(\d+)acc")
+rexposure = re.compile(r"(\d+\.?\d*)exp")
 
 class Dataset:
     def __init__(self, t, w, D):
@@ -28,14 +29,22 @@ def load_TRE(filename, nw=1024):
     wavelengths = data[:nw, 1]
     D = np.empty((ns, nw), dtype=float)
 
-    m = r.search(fname)
+    macc = racc.search(fname)
+    mexp = rexposure.search(fname)
+
     acc = 1  # number of accumulations
-    if m is not None:
-        acc = float(m.group(1))
+    exp_time = 1
+    if macc is not None:
+        acc = int(macc.group(1))
+
+    if mexp is not None:
+        exp_time = float(mexp.group(1))
+
+    print(f"File: {fname},\nExposure time: {exp_time}, Number of accumulations: {acc}\n")
 
     for i in range(ns):
-        exp_time = data[i * nw, -2]   # exposure time
-        exp_time = 0.45 if np.isnan(exp_time) else exp_time   # if exposure time is not present in the datafile, 0.45 value is used
+        exp_time_from_data = data[i * nw, -2]   # exposure time
+        exp_time = exp_time if np.isnan(exp_time_from_data) else exp_time_from_data   # if exposure time is not present in the datafile, 0.45 value is used
         times[i] = data[i * nw, -1]
         D[i, :] = data[i*nw:(i+1)*nw, 0] / (exp_time * acc)   # divide by exposure time and by number of accumulations used
         # D[i, :] = data[i*nw:(i+1)*nw, 0] / acc   # divide by exposure time and by number of accumulations used
