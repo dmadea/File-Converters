@@ -61,8 +61,8 @@ def stack_datasets(*datasets):  # , adjust_next=False
     w = datasets[0].w
 
     # subtract the time zero from all of the datasets time points
-    for d in datasets:
-        d.t -= t0
+    #for d in datasets:
+    #    d.t -= t0
     
     for i in range(1, len(datasets)):
 

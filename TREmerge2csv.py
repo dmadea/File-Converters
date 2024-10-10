@@ -57,11 +57,11 @@ def stack_datasets(*datasets):  # , adjust_next=False
     mul_factor = 1
     # x = datasets[0].w
     idx = 1   #  in default it will remove the first scan from all datasets (except the first one)
-    t0 = datasets[0].t[0]  # time zero for the first dataset
+    #t0 = datasets[0].t[0]  # time zero for the first dataset
 
     # subtract the time zero from all of the datasets time points
-    for d in datasets:
-        d.t -= t0
+    #for d in datasets:
+    #    d.t -= t0
     
     for i in range(1, len(datasets)):
         datasets[i].t = datasets[i].t[idx:]
