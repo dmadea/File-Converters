@@ -4,6 +4,8 @@ import numpy as np
 import nmrglue as ng
 import matplotlib.pyplot as plt
 from tkinter import filedialog, Tk, ttk, TOP, messagebox
+import pyaudio
+# import time
 
 # Constants - global settings
 LIGHT_THEME_COLOR = '#E7E7E7'
@@ -14,6 +16,8 @@ AMPLITUDE = 32700
 # Global variables
 path_to_directory = ''
 data = []
+rawdata = None
+dic = None
 
 
 def load_path():
@@ -25,10 +29,10 @@ def load_path():
     path_to_directory = filedialog.askdirectory()
 
     # Check that directory was set
-    if path_to_directory == '':
-        messagebox.showerror("Error", "Directory was not specified!")
-    else:
-        messagebox.showinfo("Info", "Selected path to FID: " + path_to_directory)
+    # if path_to_directory == '':
+    #     messagebox.showerror("Error", "Directory was not specified!")
+    # else:
+    #     messagebox.showinfo("Info", "Selected path to FID: " + path_to_directory)
 
 
 def write_wav():
@@ -58,7 +62,24 @@ def write_wav():
     for value in data:
         file_wav.writeframes(struct.pack('i', int(value * AMPLITUDE)))
     file_wav.close()
-    messagebox.showinfo("Info", "Writing .wav done!")
+    # messagebox.showinfo("Info", "Writing .wav done!")
+
+
+def play():
+
+    p = pyaudio.PyAudio()
+    stream = p.open(format=pyaudio.paFloat32,
+                        channels=1,
+                        rate=FRAMERATE,
+                        output=True)
+
+    output_bytes = data.tobytes()
+    # start_time = time.time()
+    stream.write(output_bytes)
+    stream.stop_stream()
+    stream.close()
+
+    p.terminate()
 
 
 def plot():
@@ -66,7 +87,7 @@ def plot():
     Plots a graph given the data vector.
     Callback function.
     """
-    global data
+    global data, rawdata
 
     if len(data) == 0:
         messagebox.showerror("Error", "Before plotting you need to parse a file.")
@@ -74,7 +95,20 @@ def plot():
 
     times = np.arange(0, data.size, 1)
     x = np.true_divide(times, np.max(np.abs(times)))
-    plt.plot(x, data, 'ko', color="blue", markersize=1)
+    # plt.plot(x, data, color="blue", lw=1)
+    # plt.plot(x, rawdata / np.abs(rawdata).max(), color='k', lw=0.5)
+
+    d = ng.bruker.remove_digital_filter(dic, rawdata)
+
+    d = ng.proc_base.zf_size(rawdata, 32768)    # zero fill to 32768 points
+    d = ng.proc_base.fft(d)               # Fourier transform
+    d = ng.proc_base.ps(d, p0=0.0)      # phase correction
+    d = ng.proc_base.di(d)                # discard the imaginaries
+    d = ng.proc_base.rev(d)               # reverse the data
+
+    # uc = ng.pipe.make_uc(dic, rawdata)
+
+    plt.plot(d, 'k-')
     plt.show()
 
 
@@ -92,8 +126,10 @@ def parse_file(producer):
     }.get(producer)
 
 
+
+
 def parse():
-    global data
+    global data, rawdata, dic
     producer = machine_producer.get()
 
     if path_to_directory == '':
@@ -105,7 +141,7 @@ def parse():
 
     try:
         # Parse file according to machine producer
-        dic, data = parse_file(producer)()
+        dic, rawdata = parse_file(producer)()
     except (FileNotFoundError, AttributeError):
         messagebox.showerror("Error", "Your FID files do not match the producer specified. " +
                                       "Try with a different producer.")
@@ -114,14 +150,17 @@ def parse():
         return
 
     # Translate data into curve
-    transposed_data = data.transpose()
+    transposed_data = rawdata.transpose()
     converted_re = np.ascontiguousarray(transposed_data.real, dtype=np.float32)
     converted_im = np.ascontiguousarray(transposed_data.imag, dtype=np.float32)
-    data = (converted_re + converted_im)
+    data = converted_re + converted_im
 
     # Normalize data
     data = np.true_divide(data, np.max(np.abs(data)))
-    messagebox.showinfo("Info", "Parsing FID file done!")
+    print("Fid parsed.")
+    # messagebox.showinfo("Info", "Parsing FID file done!")
+
+    # write_wav()
 
 
 # GUI
@@ -152,13 +191,14 @@ choice_label = ttk.Label(frame_2, text="Choose your NMR producer")
 choice_label.pack()
 machine_producer = ttk.Combobox(frame_2, state="readonly", values=["Agilent", "Bruker", "Varian"])
 machine_producer.pack()
+machine_producer.set("Bruker")
 
 # Objects in frame 3
 parse_button = ttk.Button(frame_3, text="Parse FID", command=parse)
 parse_button.pack()
 
 # Objects in frame 4
-write_wav_button = ttk.Button(frame_4, text="Generate wav", command=write_wav)
+write_wav_button = ttk.Button(frame_4, text="Play", command=play)
 plot_button = ttk.Button(frame_4, text="Plot", command=plot)
 frame_4.columnconfigure(0, weight=1)
 frame_4.columnconfigure(1, weight=1)
