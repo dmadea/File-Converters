@@ -1,12 +1,19 @@
 #!/usr/bin/python3
 
 # Converts the transient emission csv file to matrix-csv file
+# file in the format of e.g. 100acc-0.45exp-air.csv
+
+
 import sys
 import os
 import numpy as np
 import re
+import argparse
+from glob import glob
+from tkinter import Tk, filedialog
 
-from hplc_converter_base import save_mat2csv
+from hplc_converter_base import save_mat2csv, fi
+
 
 racc = re.compile(r"(\d+)acc")
 rexposure = re.compile(r"(\d+\.?\d*)exp")
@@ -49,7 +56,6 @@ def load_TRE(filename, nw=1024):
         D[i, :] = data[i*nw:(i+1)*nw, 0] / (exp_time * acc)   # divide by exposure time and by number of accumulations used
         # D[i, :] = data[i*nw:(i+1)*nw, 0] / acc   # divide by exposure time and by number of accumulations used
 
-
     return Dataset(times, wavelengths, D)
 
 def stack_datasets(*datasets):  # , adjust_next=False
@@ -80,7 +86,7 @@ def stack_datasets(*datasets):  # , adjust_next=False
         
     return Dataset(new_t, datasets[0].w, new_D)
 
-def process_filepaths(fpaths):
+def process_filepaths(fpaths, t0, w0, w1, adjust_area, k, proc1by1):
 
     # sort the filepaths according to its filename
     fpaths = sorted(fpaths, key=lambda entry: os.path.split(entry)[1])
@@ -96,17 +102,43 @@ def process_filepaths(fpaths):
 
 if __name__ == '__main__':
     # Show file open dialog if no input files specified on command line
-    if len(sys.argv) > 1:
-        filepaths = sys.argv[1:]
-    else:
-        from tkinter import Tk, filedialog
 
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--t0", nargs="?", default=None, type=float,
+                        help="Set time zero for the first dataset if proc_1by1==False or for all datasets if proc_1by1==True.")
+
+    parser.add_argument("--w0", nargs="?", default=None, type=float,
+                        help="Start wavelength to crop the data.")
+    
+    parser.add_argument("--w1", nargs="?", default=None, type=float,
+                        help="End wavelength to crop the data.")
+
+    parser.add_argument("--adjust_area", action="store_true",
+                        help="If True, connects the datasets so that the area of the average of last k-th spectra of n-th dataset is the same as average of first k-the spectra of n+1-th dataset.")
+    
+    parser.add_argument("--k", nargs="?", default=5, type=int,
+                        help="Number of spectra to average (only work if adjust_area==True).")
+    
+    parser.add_argument("--proc1by1", action="store_true",
+                        help="If True, processes and saved the datasets individually with added '_proc' sufix.")
+
+    parser.add_argument('files', nargs=argparse.ONE_OR_MORE)
+
+    args, _ = parser.parse_known_args()
+
+    filepaths = []
+    for fname in args.files:
+        filepaths += glob(fname)
+
+    if len(filepaths) == 0:
         tk_root = Tk()
         tk_root.withdraw()
-        filepaths = list(filedialog.askopenfilenames(parent=None, title='Select csv input files from TRE data.'))
+        fnames = list(filedialog.askopenfilenames(parent=None, title='Select csv input files from TRE data.'))
         tk_root.destroy()
         if len(filepaths) < 1:
             print('No input files selected. Exiting.')
             exit(1)
+
 
     process_filepaths(filepaths)
