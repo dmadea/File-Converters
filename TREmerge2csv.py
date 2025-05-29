@@ -107,28 +107,47 @@ def stack_datasets(datasets: list, t0, w0, w1, adjust_area, k, bd_corr, bd_w0, b
 
 
 def process_filepaths(fpaths, t0, w0, w1, adjust_area, k, proc1by1, bd_corr, bd_w0, bd_w1):
+    print(f"\nProcessing {len(fpaths)} files:")
+    for f in fpaths:
+        print(f"- {os.path.basename(f)}")
+    print(f"\nSettings:")
+    print(f"- Time zero adjustment: {t0 if t0 is not None else 'None'}")
+    print(f"- Wavelength range: {w0 if w0 is not None else 'start'} to {w1 if w1 is not None else 'end'}")
+    print(f"- Area adjustment: {adjust_area}")
+    print(f"- Baseline drift correction: {bd_corr}")
+    if bd_corr:
+        print(f"  - Baseline drift wavelength range: {bd_w0} to {bd_w1}")
+    print(f"- Process one by one: {proc1by1}\n")
 
     # sort the filepaths according to its filename
     fpaths = sorted(fpaths, key=lambda entry: os.path.split(entry)[1])
 
     #  load datasets
 
+    opt = "_area_ajusted" if adjust_area else ""
+
     if proc1by1:
         for path in fpaths:
+            print(f"\nProcessing file: {os.path.basename(path)}")
             dataset = load_TRE(path)
             mD = stack_datasets([dataset], t0, w0, w1, adjust_area, k, bd_corr, bd_w0, bd_w1)
             _dir, fname = os.path.split(path)   # get dir and filename
             fname, _ = os.path.splitext(fname)
-            save_mat2csv(os.path.join(_dir, f'{fname}_proc.csv'), mD.D, mD.t, mD.w, unit='ns')
+            output_path = os.path.join(_dir, f'{fname}_proc{opt}.csv')
+            save_mat2csv(output_path, mD.D, mD.t, mD.w, unit='ns')
+            print(f"Saved processed file to: {output_path}")
 
     else:
+        print("\nMerging all datasets...")
         datasets = list(map(lambda fpath: load_TRE(fpath), fpaths))
 
         mD = stack_datasets(datasets, t0, w0, w1, adjust_area, k, bd_corr, bd_w0, bd_w1)
 
         _dir, fname = os.path.split(fpaths[0])   # get dir and filename
         fname, _ = os.path.splitext(fname)
-        save_mat2csv(os.path.join(_dir, f'{fname}-{len(datasets)}_merge.csv'), mD.D, mD.t, mD.w, unit='ns')
+        output_path = os.path.join(_dir, f'{fname}-{len(datasets)}_merge{opt}.csv')
+        save_mat2csv(output_path, mD.D, mD.t, mD.w, unit='ns')
+        print(f"Saved merged file to: {output_path}")
 
 
 if __name__ == '__main__':
